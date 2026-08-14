@@ -7,7 +7,7 @@ import React, {
   useState,
 } from "react";
 
-const API_BASE = "http://localhost:5050/api";
+const API_BASE = "https://goal2go-ai.onrender.com/api";
 
 const AgentContext = createContext(null);
 
