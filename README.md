@@ -93,7 +93,7 @@ Then open `http://localhost:5173` in your browser.
 3. Narrate as it runs:
    - **0–5s** — "The agent receives a goal, not a prompt. It interprets the goal and checks its memory for prior context."
    - **5–45s** — Point at the **Task Plan** card: tasks execute one by one (Analyze syllabus → Identify weak areas → Create study schedule → Generate notes...). Point at the **Activity Log** for real-time reasoning-level updates, and the **Agent Architecture** panel on the right — the pipeline node lights up as the agent moves through stages.
-   - **~mid-run** — A **Human Approval** card appears: "Agent wants to send a study reminder to your email." Explain: *"Autonomous doesn't mean uncontrolled — sensitive actions always need a human in the loop."* In Demo Mode this auto-approves after 3 seconds (or click Approve yourself).
+   - **~mid-run** — A **Human Approval** card appears: "Simulated Action: Send Study Reminder Email" Explain: *"Autonomous doesn't mean uncontrolled — sensitive actions always need a human in the loop."* Demo Mode never auto-approves. The presenter must explicitly choose Approve or Reject.
    - **~50–60s** — Point at the **Performance Metrics** chart: Machine Learning is at 40%, below the 60% target line. The **Activity Log** shows the agent noticing this and reprioritizing — "Machine Learning performance below target. Reallocating study time." This is the **Observe → Adapt** loop, the core of autonomy.
    - **60–90s** — The **Final Result** card appears: a reprioritized study plan, tasks completed, adaptations made, and estimated time saved.
 4. Optionally click **Presentation Mode** beforehand (top right) to switch to a large-font, judge-friendly view with a simplified `GOAL → PLAN → ACT → OBSERVE → ADAPT → RESULT` flow and hidden secondary UI — ideal when projecting.
@@ -126,15 +126,19 @@ State is stored in-memory per session (a `Map` in `agentSimulation.js`) — this
 
 ---
 
-## 8. Design notes
+## 8. Configuration
+
+The frontend uses `VITE_API_BASE` for the backend API base URL. Locally it defaults to `http://localhost:5050/api`. For a deployed frontend, set it to the deployed backend URL ending in `/api`.
+
+## 9. Design notes
 
 - Dark "control-room" aesthetic by default, with a light theme toggle in the header.
 - Tailwind CSS for styling, Lucide React for icons, Recharts for the performance-metrics chart.
-- All timing (task duration, auto-approval delay) is defined in `backend/agentSimulation.js` and tuned so a full Demo Mode run lands in the 60–90 second range.
+- All timing (task durations and brief UI pause points) is defined in `backend/agentSimulation.js` and tuned so a full Demo Mode run remains presentation-friendly. Human approval is never automatic.
 
 ---
 
-## 9. Positioning statement
+## 10. Positioning statement
 
 > Goal2Go AI is a conceptual and functional prototype demonstrating the workflow of an autonomous AI productivity agent for educational purposes. It does not use real AI/LLM reasoning — every decision, adaptation, and "insight" is scripted to illustrate what an autonomous agent's workflow looks and feels like, for an Ideathon audience.
 

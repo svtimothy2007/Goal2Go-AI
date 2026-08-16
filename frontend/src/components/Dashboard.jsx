@@ -14,7 +14,7 @@ import AgentPipeline from "./AgentPipeline.jsx";
 import Card from "./Card.jsx";
 
 export default function Dashboard() {
-  const { state, approveAction, theme } = useAgent();
+  const { state, approveAction, theme, actionBusy } = useAgent();
   if (!state) return null;
   const isLight = theme === "light";
 
@@ -48,7 +48,7 @@ export default function Dashboard() {
       <ApprovalPanel
         pendingApproval={state.pendingApproval}
         onApprove={approveAction}
-        demoMode={state.demoMode}
+        actionBusy={actionBusy}
       />
       {state.pendingApproval && <div className="mb-5" />}
 
@@ -56,7 +56,16 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 flex flex-col gap-5">
           <TaskList tasks={state.tasks} />
-          <MetricsChart metrics={state.metrics} />
+          <MetricsChart metrics={state.metrics} target={state.targetScore} />
+          {state.adaptations.length > 0 && (
+            <Card className="border-amber/40 ring-1 ring-amber/15" title="Observe → Adapt" >
+              <div className="space-y-2 text-sm">
+                <p className="text-ink">Machine Learning performance is <strong>40%</strong>, below the <strong>60%</strong> target.</p>
+                <p className="text-amber">Agent detected a performance gap and reallocated study time.</p>
+                <p className="text-ink-muted">Machine Learning allocation: <span className="line-through text-ink-faint">20%</span> → <strong className="text-amber">45%</strong> (top priority)</p>
+              </div>
+            </Card>
+          )}
           <ActivityLog entries={state.activityLog} />
           {state.result && (
             <ResultSummary result={state.result} adaptations={state.adaptations} />

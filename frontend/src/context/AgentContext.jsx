@@ -7,9 +7,9 @@ import React, {
   useState,
 } from "react";
 
-const API_BASE = "https://goal2go-ai.onrender.com/api";
-
+const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:5050/api").replace(/\/$/, "");
 const AgentContext = createContext(null);
+const DEFAULT_GOAL = "Prepare me for my Data Science exam tomorrow.";
 
 export function useAgent() {
   const ctx = useContext(AgentContext);
@@ -17,16 +17,16 @@ export function useAgent() {
   return ctx;
 }
 
-const DEFAULT_GOAL = "Prepare me for my Data Science exam tomorrow.";
-
 export function AgentProvider({ children }) {
   const [goal, setGoal] = useState("");
   const [sessionId, setSessionId] = useState(null);
-  const [state, setState] = useState(null); // full agent state from backend
+  const [state, setState] = useState(null);
   const [connectionError, setConnectionError] = useState(null);
   const [presentationMode, setPresentationMode] = useState(false);
-  const [theme, setTheme] = useState("dark"); // 'dark' | 'light'
+  const [theme, setTheme] = useState("dark");
+  const [actionBusy, setActionBusy] = useState(false);
   const pollRef = useRef(null);
+  const sessionRef = useRef(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -35,93 +35,120 @@ export function AgentProvider({ children }) {
     }
   }, []);
 
-  const poll = useCallback((id) => {
-    stopPolling();
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/get-status?sessionId=${id}`);
-        if (!res.ok) throw new Error("Session not found");
-        const data = await res.json();
-        setConnectionError(null);
-        setState(data);
-        if (data.status === "complete") {
+  const fetchStatus = useCallback(async (id) => {
+    const res = await fetch(`${API_BASE}/get-status?sessionId=${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error("Session not found");
+    return res.json();
+  }, []);
+
+  const poll = useCallback(
+    (id) => {
+      stopPolling();
+      const tick = async () => {
+        try {
+          const data = await fetchStatus(id);
+          if (sessionRef.current !== id) return;
+          setConnectionError(null);
+          setState(data);
+          if (data.status === "complete") stopPolling();
+        } catch {
+          if (sessionRef.current !== id) return;
+          setConnectionError("Cannot reach the Goal2Go backend. Check that the backend is running or that VITE_API_BASE is configured correctly.");
           stopPolling();
         }
-      } catch (err) {
-        setConnectionError(
-          "Cannot reach the Goal2Go backend. Make sure the server is running (npm run dev in /backend)."
-        );
-        stopPolling();
-      }
-    }, 700);
-  }, [stopPolling]);
+      };
+      tick();
+      pollRef.current = setInterval(tick, 700);
+    },
+    [fetchStatus, stopPolling]
+  );
 
   const startAgent = useCallback(
     async (goalText, demoMode = false) => {
+      if (actionBusy || (state && state.status !== "complete")) return false;
       const finalGoal = (goalText || goal || DEFAULT_GOAL).trim();
+      if (!finalGoal) {
+        setConnectionError("Please enter a goal before starting the agent.");
+        return false;
+      }
+
+      setActionBusy(true);
       try {
+        stopPolling();
         const res = await fetch(`${API_BASE}/start-agent`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ goal: finalGoal, demoMode }),
+          body: JSON.stringify({ goal: finalGoal, demoMode: demoMode === true }),
         });
-        if (!res.ok) throw new Error("Failed to start agent");
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to start agent");
         setConnectionError(null);
         setGoal(finalGoal);
         setSessionId(data.sessionId);
+        sessionRef.current = data.sessionId;
+        setState(null);
         poll(data.sessionId);
-      } catch (err) {
-        setConnectionError(
-          "Cannot reach the Goal2Go backend. Make sure the server is running (npm run dev in /backend)."
-        );
+        return true;
+      } catch {
+        setConnectionError("Cannot reach the Goal2Go backend. Check that the backend is running or that VITE_API_BASE is configured correctly.");
+        return false;
+      } finally {
+        setActionBusy(false);
       }
     },
-    [goal, poll]
+    [actionBusy, goal, poll, state, stopPolling]
   );
 
   const approveAction = useCallback(
     async (approved) => {
-      if (!sessionId) return;
+      if (!sessionId || !state?.pendingApproval || actionBusy || typeof approved !== "boolean") return false;
+      setActionBusy(true);
       try {
         const res = await fetch(`${API_BASE}/approve-action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, approved }),
         });
-        if (!res.ok) throw new Error("Failed to submit approval");
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to submit approval");
+        setConnectionError(null);
         setState(data);
-      } catch (err) {
-        setConnectionError(
-          "Cannot reach the Goal2Go backend. Make sure the server is running (npm run dev in /backend)."
-        );
+        return true;
+      } catch {
+        setConnectionError("The approval could not be submitted. Please check the backend connection and try again.");
+        return false;
+      } finally {
+        setActionBusy(false);
       }
     },
-    [sessionId]
+    [actionBusy, sessionId, state?.pendingApproval]
   );
 
   const resetAgent = useCallback(async () => {
+    const oldSessionId = sessionId;
     stopPolling();
-    if (sessionId) {
+    sessionRef.current = null;
+    setActionBusy(false);
+
+    if (oldSessionId) {
       try {
         await fetch(`${API_BASE}/reset`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
+          body: JSON.stringify({ sessionId: oldSessionId }),
         });
       } catch {
-        /* best-effort */
+        // UI reset still proceeds; backend cleanup is best-effort.
       }
     }
+
     setSessionId(null);
     setState(null);
     setGoal("");
+    setConnectionError(null);
   }, [sessionId, stopPolling]);
 
-  const startDemo = useCallback(() => {
-    startAgent(DEFAULT_GOAL, true);
-  }, [startAgent]);
+  const startDemo = useCallback(() => startAgent(DEFAULT_GOAL, true), [startAgent]);
 
   useEffect(() => stopPolling, [stopPolling]);
 
@@ -137,6 +164,7 @@ export function AgentProvider({ children }) {
     sessionId,
     state,
     connectionError,
+    actionBusy,
     startAgent,
     approveAction,
     resetAgent,

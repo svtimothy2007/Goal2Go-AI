@@ -15,7 +15,7 @@ const FLOW = [
 ];
 
 export default function PresentationView() {
-  const { state, approveAction, startDemo } = useAgent();
+  const { state, approveAction, startDemo, actionBusy } = useAgent();
 
   const activeIndex = state ? FLOW.findIndex((f) => f.key === state.stage) : -1;
   const currentTask = state?.tasks?.[state.currentTaskIndex];
@@ -99,8 +99,17 @@ export default function PresentationView() {
               <ApprovalPanel
                 pendingApproval={state.pendingApproval}
                 onApprove={approveAction}
-                demoMode={state.demoMode}
+                actionBusy={actionBusy}
               />
+            </div>
+          )}
+
+          {state.adaptations?.length > 0 && (
+            <div className="max-w-2xl mx-auto mb-8 rounded-2xl border border-amber/40 bg-amber/10 p-5 text-left">
+              <p className="text-xs uppercase tracking-[0.2em] text-amber font-semibold mb-2">Observe → Adapt</p>
+              <p className="text-lg font-semibold text-ink">Machine Learning: 40% vs 60% target</p>
+              <p className="text-sm text-ink-muted mt-1">Agent detected a performance gap → reallocated study time → moved Machine Learning to top priority.</p>
+              <p className="text-sm text-amber font-semibold mt-2">Allocation: 20% → 45%</p>
             </div>
           )}
 
@@ -110,10 +119,17 @@ export default function PresentationView() {
                 Autonomous run complete
               </h2>
               <p className="text-ink text-lg mb-6">{state.result.summary}</p>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-4 mb-5">
                 <BigStat value={state.result.tasksCompleted} label="Tasks completed" />
                 <BigStat value={state.result.adaptationsMade} label="Adaptations made" />
                 <BigStat value={`${state.result.elapsedSeconds}s`} label="Run time" />
+              </div>
+              <div className="rounded-xl bg-surface-alt p-4 text-left">
+                <p className="text-xs uppercase tracking-wide text-ink-faint mb-2">Final allocation</p>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  {state.result.studyPlan.map((item) => <div key={item.topic}><span className="text-ink-muted">{item.topic}</span><strong className="block text-signal text-lg">{item.allocation}</strong></div>)}
+                </div>
+                <p className="text-xs text-ink-faint mt-3">Sensitive action outcome: {state.result.sensitiveActionOutcome}</p>
               </div>
             </div>
           )}

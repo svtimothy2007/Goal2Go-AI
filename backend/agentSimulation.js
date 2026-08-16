@@ -1,33 +1,28 @@
 /**
- * agentSimulation.js
+ * Goal2Go AI — deterministic autonomous-agent prototype.
  *
- * This module simulates the internal lifecycle of an autonomous AI agent.
- * IMPORTANT: This is a scripted simulation for demonstration purposes.
- * No real AI/LLM reasoning happens here — it is a deterministic state
- * machine that mimics the *shape* of autonomous agent behavior:
- *   understand -> plan -> use tools -> act -> observe -> adapt -> result
- *
- * Each session is fully isolated and stored in-memory (Map). This is a
- * prototype; a production system would use a real datastore.
+ * This is a scripted simulation for demonstration purposes. It does not use
+ * real AI/LLM reasoning or real external services.
  */
 
 const { randomUUID } = require("crypto");
 
-// ---- Static "world knowledge" the simulation draws from -------------------
+const TARGET_SCORE = 60;
+const INITIAL_METRICS = { Statistics: 85, Python: 70, "Machine Learning": 40 };
 
 const TASK_DEFINITIONS = [
   {
     id: "t1",
     name: "Analyze syllabus",
     tool: "File Organizer",
-    log: "Scanning uploaded syllabus and course materials...",
+    log: "Analyzing simulated syllabus data and course context...",
     durationMs: 8000,
   },
   {
     id: "t2",
     name: "Identify weak areas",
     tool: "Progress Analyzer",
-    log: "Cross-referencing past quiz scores against topic list...",
+    log: "Cross-referencing practice scores against the topic list...",
     durationMs: 9000,
   },
   {
@@ -45,7 +40,8 @@ const TASK_DEFINITIONS = [
     durationMs: 10000,
     sensitiveAfter: {
       id: "email_reminder",
-      message: "Agent wants to send a study reminder to your email.",
+      label: "Simulated Action: Send Study Reminder Email",
+      message: "Simulated Action: Send Study Reminder Email",
       auditAction: "Send study reminder email",
     },
   },
@@ -73,8 +69,6 @@ const TASK_DEFINITIONS = [
   },
 ];
 
-const INITIAL_METRICS = { Statistics: 85, Python: 70, "Machine Learning": 40 };
-
 const MEMORY = {
   preferences: [
     "Short study sessions (30 min blocks)",
@@ -82,8 +76,8 @@ const MEMORY = {
     "Prefers visual explanations",
   ],
   previousProgress: [
-    { topic: "Python", level: "Strong", value: 85 },
-    { topic: "Statistics", level: "Moderate", value: 75 },
+    { topic: "Python", level: "Good", value: 70 },
+    { topic: "Statistics", level: "Strong", value: 85 },
     { topic: "Machine Learning", level: "Needs Improvement", value: 40 },
   ],
 };
@@ -97,39 +91,38 @@ const TOOLS = [
   { id: "files", name: "File Organizer", icon: "folder-cog" },
 ];
 
-// ---- Session store ----------------------------------------------------
-
 const sessions = new Map();
 
 function nowStamp() {
-  const d = new Date();
-  return d.toLocaleTimeString("en-US", { hour12: false });
+  return new Date().toLocaleTimeString("en-US", { hour12: false });
 }
 
 function freshState(goal, demoMode) {
   return {
     goal,
     demoMode: !!demoMode,
-    status: "running", // running | paused-approval | complete
-    stage: "understand", // understand | plan | tools | act | observe | adapt | result
-    tasks: TASK_DEFINITIONS.map((t) => ({
-      id: t.id,
-      name: t.name,
-      tool: t.tool,
-      status: "pending", // pending | in-progress | complete
+    status: "running",
+    stage: "understand",
+    tasks: TASK_DEFINITIONS.map((task) => ({
+      id: task.id,
+      name: task.name,
+      tool: task.tool,
+      status: "pending",
     })),
     currentTaskIndex: -1,
     progress: 0,
     activityLog: [],
     metrics: { ...INITIAL_METRICS },
+    targetScore: TARGET_SCORE,
     adaptations: [],
     pendingApproval: null,
     auditLog: [],
-    memory: MEMORY,
+    memory: JSON.parse(JSON.stringify(MEMORY)),
     tools: TOOLS,
     result: null,
     startedAt: Date.now(),
     finishedAt: null,
+    sensitiveAction: null,
     _timer: null,
   };
 }
@@ -138,32 +131,40 @@ function pushLog(state, message, type = "info") {
   state.activityLog.push({ time: nowStamp(), message, type });
 }
 
-function pushAudit(state, action, status, approvalRequired) {
+function addAudit(state, action, status, approvalRequired) {
   state.auditLog.push({
     action,
     time: nowStamp(),
     status,
     approvalRequired: !!approvalRequired,
+    approval: approvalRequired ? "Human" : "—",
   });
+  return state.auditLog[state.auditLog.length - 1];
+}
+
+function updateAudit(state, action, status) {
+  const entry = [...state.auditLog].reverse().find((item) => item.action === action);
+  if (entry) {
+    entry.time = nowStamp();
+    entry.status = status;
+    entry.approval = "Human";
+    return entry;
+  }
+  return addAudit(state, action, status, true);
 }
 
 function computeProgress(state) {
   const total = state.tasks.length;
-  const completed = state.tasks.filter((t) => t.status === "complete").length;
-  const inProgress = state.tasks.some((t) => t.status === "in-progress") ? 0.5 : 0;
-  state.progress = Math.min(
-    100,
-    Math.round(((completed + inProgress) / total) * 100)
-  );
+  const completed = state.tasks.filter((task) => task.status === "complete").length;
+  const inProgress = state.tasks.some((task) => task.status === "in-progress") ? 0.5 : 0;
+  state.progress = Math.min(100, Math.round(((completed + inProgress) / total) * 100));
 }
 
-/** Advance the simulation to the next task, respecting approval gates. */
 function advance(sessionId) {
   const state = sessions.get(sessionId);
-  if (!state || state.status === "complete") return;
+  if (!state || state.status === "complete" || state.status === "paused-approval") return;
 
   const nextIndex = state.currentTaskIndex + 1;
-
   if (nextIndex >= state.tasks.length) {
     finish(state);
     return;
@@ -177,29 +178,31 @@ function advance(sessionId) {
   pushLog(state, def.log, "tool");
   computeProgress(state);
 
-  state._timer = setTimeout(() => {
-    completeTask(sessionId, def);
-  }, def.durationMs);
+  state._timer = setTimeout(() => completeTask(sessionId, def), def.durationMs);
 }
 
 function completeTask(sessionId, def) {
   const state = sessions.get(sessionId);
-  if (!state) return;
+  if (!state || state.status === "complete" || state.status === "paused-approval") return;
 
-  const idx = state.tasks.findIndex((t) => t.id === def.id);
+  const idx = state.tasks.findIndex((task) => task.id === def.id);
+  if (idx < 0 || state.tasks[idx].status !== "in-progress") return;
+
   state.tasks[idx].status = "complete";
   pushLog(state, `Completed: ${def.name}`, "task-complete");
   computeProgress(state);
 
-  // Adaptation trigger (Observe -> Adapt cycle)
   if (def.triggersAdaptation) {
     runAdaptation(state);
+    // Hold the adapted state long enough for the UI/presentation mode to show
+    // the Observe → Adapt evidence before the next task starts.
+    state._timer = setTimeout(() => advance(sessionId), 1800);
+    return;
   }
 
-  // Human-in-the-loop trigger
   if (def.sensitiveAfter) {
     requestApproval(sessionId, def.sensitiveAfter);
-    return; // pause pipeline until approved/rejected
+    return;
   }
 
   advance(sessionId);
@@ -209,65 +212,74 @@ function runAdaptation(state) {
   state.stage = "observe";
   pushLog(
     state,
-    `Observation: Machine Learning performance is ${state.metrics["Machine Learning"]}%, below the 60% target.`,
+    `Machine Learning performance is ${state.metrics["Machine Learning"]}%, below the ${TARGET_SCORE}% target.`,
     "observation"
   );
+  pushLog(state, "Agent detected a performance gap.", "observation");
+  pushLog(state, "Reallocating study time.", "adaptation");
+
   state.stage = "adapt";
   const adaptation = {
     time: nowStamp(),
-    message:
-      "Machine Learning performance below target. Reallocating study time.",
-    detail:
-      "Increasing Machine Learning allocation from 20% to 45% of remaining study time; reducing Statistics allocation (already strong at 85%).",
+    message: "Machine Learning moved to top priority.",
+    detail: "Machine Learning allocation increased from 20% to 45% of remaining study time.",
+    from: 20,
+    to: 45,
+    target: TARGET_SCORE,
+    observed: state.metrics["Machine Learning"],
   };
   state.adaptations.push(adaptation);
-  pushLog(state, adaptation.message, "adaptation");
+  pushLog(state, "Machine Learning allocation increased from 20% to 45%.", "adaptation");
   pushLog(state, "Plan reprioritized: Machine Learning moved to top priority.", "adaptation");
 }
 
 function requestApproval(sessionId, sensitive) {
   const state = sessions.get(sessionId);
+  if (!state || state.pendingApproval) return;
+
   state.status = "paused-approval";
   state.stage = "act";
   state.pendingApproval = {
     id: sensitive.id,
+    label: sensitive.label,
     message: sensitive.message,
     requestedAt: nowStamp(),
   };
-  pushLog(state, `Approval required: ${sensitive.message}`, "approval-request");
-  pushAudit(state, sensitive.auditAction, "Pending approval", true);
+  state.sensitiveAction = {
+    id: sensitive.id,
+    action: sensitive.auditAction,
+    outcome: "Pending approval",
+  };
 
-  // IMPORTANT: Never auto-approve sensitive actions.
-  // The demo intentionally pauses here so the presenter can click
-  // Approve/Reject and demonstrate human-in-the-loop safety.
+  pushLog(state, `Human Approval Required: ${sensitive.label}`, "approval-request");
+  addAudit(state, sensitive.auditAction, "Pending approval", true);
 }
 
-function resolveApproval(sessionId, approved, auto = false) {
+function resolveApproval(sessionId, approved) {
   const state = sessions.get(sessionId);
-  if (!state || !state.pendingApproval) return;
+  if (!state || !state.pendingApproval || state.status !== "paused-approval") return null;
 
   const sensitive = state.pendingApproval;
+  const auditAction = sensitive.id === "email_reminder" ? "Send study reminder email" : sensitive.id;
+
+  // Clear the gate before continuing so a second request cannot resolve it twice.
   state.pendingApproval = null;
   state.status = "running";
 
-  const auditAction =
-    sensitive.id === "email_reminder"
-      ? "Send study reminder email"
-      : sensitive.id;
-
   if (approved) {
-    pushLog(
-      state,
-      `${auto ? "Auto-" : ""}Approved: ${sensitive.message}`,
-      "approval-granted"
-    );
-    pushAudit(state, auditAction, "Approved" + (auto ? " (auto, demo mode)" : ""), true);
+    state.sensitiveAction = { id: sensitive.id, action: auditAction, outcome: "Approved — simulated only" };
+    pushLog(state, `Approved by human: ${sensitive.label}`, "approval-granted");
+    pushLog(state, "Simulated action approved. No real external action was performed.", "approval-granted");
+    updateAudit(state, auditAction, "Approved");
   } else {
-    pushLog(state, `Rejected: ${sensitive.message}`, "approval-denied");
-    pushAudit(state, auditAction, "Rejected", true);
+    state.sensitiveAction = { id: sensitive.id, action: auditAction, outcome: "Rejected — not executed" };
+    pushLog(state, `Rejected by human: ${sensitive.label}`, "approval-denied");
+    pushLog(state, "Sensitive action was not executed. Workflow continues safely.", "approval-denied");
+    updateAudit(state, auditAction, "Rejected");
   }
 
   advance(sessionId);
+  return getStatus(sessionId);
 }
 
 function finish(state) {
@@ -277,39 +289,43 @@ function finish(state) {
   state.finishedAt = Date.now();
 
   const elapsedSec = Math.round((state.finishedAt - state.startedAt) / 1000);
+  const sensitiveOutcome = state.sensitiveAction?.outcome || "Not reached";
 
   state.result = {
-    summary:
-      "Personalized Data Science exam prep plan generated and prioritized around your weakest topic.",
+    summary: "Personalized Data Science exam prep plan generated and prioritized around the weakest topic.",
     studyPlan: [
-      { topic: "Machine Learning", allocation: "45%", note: "Reprioritized after low practice scores (40%)" },
-      { topic: "Statistics", allocation: "20%", note: "Light review — already strong (85%)" },
-      { topic: "Python", allocation: "35%", note: "Targeted practice on weaker sub-topics" },
+      { topic: "Machine Learning", allocation: "45%", note: "Reprioritized after low practice score (40%)" },
+      { topic: "Statistics", allocation: "20%", note: "Light review — strong performance (85%)" },
+      { topic: "Python", allocation: "35%", note: "Targeted practice (70%)" },
     ],
+    performance: { ...state.metrics },
+    targetScore: TARGET_SCORE,
     tasksCompleted: state.tasks.length,
     adaptationsMade: state.adaptations.length,
-    timeSavedEstimate: "~2.5 hours vs. manual planning",
+    sensitiveActionOutcome: sensitiveOutcome,
+    timeSavedEstimate: "~2.5 hours",
+    timeSavedNote: "Prototype estimate based on simulated manual planning time.",
     elapsedSeconds: elapsedSec,
   };
 
   pushLog(state, "Final study plan ready. Autonomous run complete.", "result");
 }
 
-// ---- Public API ---------------------------------------------------------
-
 function startAgent(goal, demoMode) {
   const sessionId = randomUUID();
   const state = freshState(goal, demoMode);
   sessions.set(sessionId, state);
-  pushLog(state, `Goal received: "${goal}"`, "start");
-  pushLog(state, "Interpreting goal and checking memory for prior context...", "understand");
-  pushLog(state, "Building task plan...", "plan");
-  state.stage = "plan";
-  computeProgress(state);
 
-  // Small delay before the first task so the UI can show the
-  // "understand -> plan" stages distinctly, like a real agent would.
-  state._timer = setTimeout(() => advance(sessionId), 1500);
+  pushLog(state, `Goal received: "${goal}"`, "start");
+  pushLog(state, "Interpreting goal and checking simulated memory for prior context...", "understand");
+  computeProgress(state);
+  state._timer = setTimeout(() => {
+    const current = sessions.get(sessionId);
+    if (!current || current.status !== "running") return;
+    current.stage = "plan";
+    pushLog(current, "Building task plan...", "plan");
+    current._timer = setTimeout(() => advance(sessionId), 800);
+  }, 700);
 
   return sessionId;
 }
@@ -317,25 +333,18 @@ function startAgent(goal, demoMode) {
 function getStatus(sessionId) {
   const state = sessions.get(sessionId);
   if (!state) return null;
-  // Strip internal-only fields before returning to the client.
   const { _timer, ...publicState } = state;
   return publicState;
 }
 
 function approveAction(sessionId, approved) {
-  resolveApproval(sessionId, approved, false);
-  return getStatus(sessionId);
+  return resolveApproval(sessionId, approved);
 }
 
 function resetSession(sessionId) {
   const state = sessions.get(sessionId);
-  if (state && state._timer) clearTimeout(state._timer);
+  if (state?._timer) clearTimeout(state._timer);
   sessions.delete(sessionId);
 }
 
-module.exports = {
-  startAgent,
-  getStatus,
-  approveAction,
-  resetSession,
-};
+module.exports = { startAgent, getStatus, approveAction, resetSession };

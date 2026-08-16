@@ -9,20 +9,17 @@ const STATUS_COLOR = {
 };
 
 function statusColor(status) {
-  const key = Object.keys(STATUS_COLOR).find((k) => status.startsWith(k));
-  return key ? STATUS_COLOR[key] : "text-ink-muted";
+  return STATUS_COLOR[status] || "text-ink-muted";
 }
 
 export default function AuditLog({ entries = [] }) {
   return (
     <Card title="Audit Log" icon={<ClipboardList size={14} className="text-signal" />}>
       {entries.length === 0 ? (
-        <p className="text-sm text-ink-faint py-3 text-center">
-          Sensitive actions requiring approval will be logged here.
-        </p>
+        <p className="text-sm text-ink-faint py-3 text-center">Sensitive actions requiring approval will be logged here.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs min-w-[520px]">
             <thead>
               <tr className="text-left text-ink-faint uppercase tracking-wide">
                 <th className="font-medium pb-2 pr-3">Action</th>
@@ -32,18 +29,21 @@ export default function AuditLog({ entries = [] }) {
               </tr>
             </thead>
             <tbody>
-              {entries.map((e, i) => (
-                <tr key={i} className="border-t border-surface-border">
-                  <td className="py-2 pr-3 text-ink">{e.action}</td>
-                  <td className="py-2 pr-3 text-ink-faint font-mono">{e.time}</td>
-                  <td className={`py-2 pr-3 font-medium ${statusColor(e.status)}`}>{e.status}</td>
-                  <td className="py-2 text-ink-muted">{e.approvalRequired ? "Yes" : "No"}</td>
+              {entries.map((entry, i) => (
+                <tr key={`${entry.action}-${i}`} className="border-t border-surface-border">
+                  <td className="py-2 pr-3 text-ink">{entry.action}</td>
+                  <td className="py-2 pr-3 text-ink-faint font-mono">{entry.time}</td>
+                  <td className={`py-2 pr-3 font-medium ${statusColor(entry.status)}`}>{entry.status}</td>
+                  <td className="py-2 text-ink-muted">{entry.approval || (entry.approvalRequired ? "Human" : "—")}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      <p className="text-[11px] text-ink-faint mt-3">
+        One row represents the current outcome of each sensitive action, so an approved action is never shown as still pending.
+      </p>
     </Card>
   );
 }

@@ -4,7 +4,7 @@ import { useAgent } from "../context/AgentContext.jsx";
 import Button from "./Button.jsx";
 
 export default function GoalHero() {
-  const { startAgent, startDemo, connectionError, DEFAULT_GOAL, theme } = useAgent();
+  const { startAgent, startDemo, connectionError, DEFAULT_GOAL, theme, actionBusy } = useAgent();
   const [input, setInput] = useState("");
   const isLight = theme === "light";
 
@@ -48,8 +48,8 @@ export default function GoalHero() {
               : "bg-surface border-surface-border text-ink placeholder:text-ink-faint focus:border-signal/60",
           ].join(" ")}
         />
-        <Button type="submit" variant="primary" icon={<Rocket size={16} />}>
-          Start Autonomous Agent
+        <Button type="submit" variant="primary" icon={<Rocket size={16} />} disabled={actionBusy}>
+          {actionBusy ? "Starting…" : "Start Autonomous Agent"}
         </Button>
       </form>
 
@@ -59,8 +59,8 @@ export default function GoalHero() {
         <div className="h-px w-10 bg-surface-border" />
       </div>
 
-      <Button variant="secondary" size="sm" icon={<Play size={13} />} onClick={startDemo} className="mt-3">
-        Demo Mode — guided full scenario with human approval (60–90s)
+      <Button variant="secondary" size="sm" icon={<Play size={13} />} onClick={startDemo} className="mt-3" disabled={actionBusy}>
+        Demo Mode — guided scenario with human approval (60–90s)
       </Button>
 
       {connectionError && (
