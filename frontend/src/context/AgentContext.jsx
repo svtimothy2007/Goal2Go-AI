@@ -7,7 +7,7 @@ import React, {
   useState,
 } from "react";
 
-const API_BASE = (import.meta.env.VITE_API_BASE || "https://goal2go-ai.onrender.com").replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://goal2go-ai.onrender.com/api").replace(/\/$/, "");
 const AgentContext = createContext(null);
 const DEFAULT_GOAL = "Prepare me for my Data Science exam tomorrow.";
 
